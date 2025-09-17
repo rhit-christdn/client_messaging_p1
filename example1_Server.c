@@ -5,6 +5,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
+#include <pthread.h>
+
+char username[32];
+char remoteUsername[32];
 
 void error(char *msg)
 {
@@ -14,47 +19,50 @@ void error(char *msg)
 
 void *receiveMessage(void *socket)
 {
-    int sockfd, ret;
+    int sockfd = *(int *)socket;
     char buffer[256];
-    sockfd = (int)socket;
+    int ret;
 
     memset(buffer, 0, sizeof(buffer));
-    while ((ret = read(sockfd, buffer, sizeof(buffer))) > 0)
+    while ((ret = read(sockfd, buffer, sizeof(buffer) - 1)) > 0)
     {
-        printf("<CLIENT>: %s", buffer);
+        buffer[ret] = '\0';
+        printf("%s", buffer);
     }
     if (ret < 0)
         printf("Error receiving data!\n");
     else
         printf("Closing connection\n");
     close(sockfd);
+    return NULL;
 }
 
 void *sendMessage(void *socket)
 {
-    int sockfd;
+    int sockfd = *(int *)socket;
     char buffer[256];
-    sockfd = (int)socket;
 
     while (1)
     {
         memset(buffer, 0, sizeof(buffer));
-        if (!fgets(buffer, (int)sizeof(buffer), stdin))
+        if (!fgets(buffer, sizeof(buffer), stdin))
             error("ERROR reading stdin");
 
-        ssize_t n = write(sockfd, buffer, strlen(buffer));
+        char message[300];
+        snprintf(message, sizeof(message), "<%s> %s", username, buffer);
+
+        ssize_t n = write(sockfd, message, strlen(message));
         if (n < 0)
             error("ERROR writing to socket");
     }
+    return NULL;
 }
 
 int main(int argc, char *argv[])
 {
     int sockfd, newsockfd, portno;
     socklen_t clilen;
-    char buffer[256];
     struct sockaddr_in serv_addr, cli_addr;
-    int n, ret;
     pthread_t rThread, sThread;
 
     if (argc < 2)
@@ -62,6 +70,11 @@ int main(int argc, char *argv[])
         fprintf(stderr, "ERROR, no port provided\n");
         exit(1);
     }
+
+    printf("Provide user name: ");
+    if (!fgets(username, sizeof(username), stdin))
+        error("ERROR reading username");
+    username[strcspn(username, "\n")] = 0;
 
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
@@ -72,8 +85,7 @@ int main(int argc, char *argv[])
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(portno);
     serv_addr.sin_addr.s_addr = INADDR_ANY;
-    if (bind(sockfd, (struct sockaddr *)&serv_addr,
-             sizeof(serv_addr)) < 0)
+    if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
         error("ERROR on binding");
 
     listen(sockfd, 5);
@@ -82,22 +94,19 @@ int main(int argc, char *argv[])
     if (newsockfd < 0)
         error("ERROR on accept");
 
-    while (1)
-    {
-        // creating a new thread for sending messages to the client
-        if (ret = pthread_create(&sThread, NULL, sendMessage, (void *)newsockfd))
-        {
-            printf("ERROR: Return Code from pthread1_create() is %d\n", ret);
-            error("ERROR creating thread");
-        }
+    read(newsockfd, remoteUsername, sizeof(remoteUsername));
+    write(newsockfd, username, strlen(username));
+    printf("Connection established with %s (%s)\n",
+           inet_ntoa(cli_addr.sin_addr), remoteUsername);
 
-        // creating a new thread for receiving messages from the client
-        if (ret = pthread_create(&rThread, NULL, receiveMessage, (void *)newsockfd))
-        {
-            printf("ERROR: Return Code from pthread2_create() is %d\n", ret);
-            error("ERROR creating thread");
-        }
-    }
+    if (pthread_create(&sThread, NULL, sendMessage, &newsockfd))
+        error("ERROR creating send thread");
+
+    if (pthread_create(&rThread, NULL, receiveMessage, &newsockfd))
+        error("ERROR creating receive thread");
+
+    pthread_join(sThread, NULL);
+    pthread_join(rThread, NULL);
 
     return 0;
 }
