@@ -17,6 +17,21 @@ void error(char *msg)
     exit(1);
 }
 
+int checkExitMsg(char *msg)
+{
+    size_t len = strlen(msg);
+    if (len > 0 && msg[len - 1] == '\n')
+    {
+        msg[len - 1] = '\0';
+    }
+    if ((strcmp(msg, "exit") == 0))
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 void *receiveMessage(void *socket)
 {
     int sockfd = *(int *)socket;
@@ -26,7 +41,12 @@ void *receiveMessage(void *socket)
     memset(buffer, 0, sizeof(buffer));
     while ((ret = read(sockfd, buffer, sizeof(buffer) - 1)) > 0)
     {
+        printf("message received");
         buffer[ret] = '\0';
+        if (checkExitMsg(buffer))
+        {
+            exit(1);
+        }
         printf("%s", buffer);
     }
     if (ret < 0)
@@ -34,6 +54,7 @@ void *receiveMessage(void *socket)
     else
         printf("Closing connection\n");
     close(sockfd);
+    exit(1);
     return NULL;
 }
 
@@ -41,6 +62,7 @@ void *sendMessage(void *socket)
 {
     int sockfd = *(int *)socket;
     char buffer[256];
+    ssize_t n;
 
     while (1)
     {
@@ -50,8 +72,17 @@ void *sendMessage(void *socket)
 
         char message[300];
         snprintf(message, sizeof(message), "<%s> %s", username, buffer);
+        
+        if(checkExitMsg(buffer))
+        {
+            n = write(sockfd, buffer, strlen(buffer));
+            exit(1);
+        }
+        else
+        {
+            n = write(sockfd, message, strlen(message));
+        }
 
-        ssize_t n = write(sockfd, message, strlen(message));
         if (n < 0)
             error("ERROR writing to socket");
     }

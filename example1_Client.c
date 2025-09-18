@@ -1,13 +1,13 @@
 #include <stdio.h>
-#include <stdlib.h>     // exit, atoi
-#include <string.h>     // strlen, memset, memcpy
-#include <unistd.h>     // read, write, close
+#include <stdlib.h> // exit, atoi
+#include <string.h> // strlen, memset, memcpy
+#include <unistd.h> // read, write, close
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netdb.h>      // gethostbyname
-#include <arpa/inet.h>  // htons, inet_ntoa
-#include <pthread.h>    // pthreads
+#include <netdb.h>     // gethostbyname
+#include <arpa/inet.h> // htons, inet_ntoa
+#include <pthread.h>   // pthreads
 
 char username[32];
 char remoteUsername[32];
@@ -18,25 +18,19 @@ static void error(const char *msg)
     exit(1);
 }
 
-void *sendMessage(void *socket)
+int checkExitMsg(char *msg)
 {
-    int sockfd = *(int *)socket;
-    char buffer[256];
-
-    while (1)
+    size_t len = strlen(msg);
+    if (len > 0 && msg[len - 1] == '\n')
     {
-        memset(buffer, 0, sizeof(buffer));
-        if (!fgets(buffer, sizeof(buffer), stdin))
-            error("ERROR reading stdin");
-
-        char message[300];
-        snprintf(message, sizeof(message), "<%s> %s", username, buffer);
-
-        ssize_t n = write(sockfd, message, strlen(message));
-        if (n < 0)
-            error("ERROR writing to socket");
+        msg[len - 1] = '\0';
     }
-    return NULL;
+    if ((strcmp(msg, "exit") == 0))
+    {
+        return 1;
+    }
+
+    return 0;
 }
 
 void *receiveMessage(void *socket)
@@ -48,7 +42,12 @@ void *receiveMessage(void *socket)
     memset(buffer, 0, sizeof(buffer));
     while ((ret = read(sockfd, buffer, sizeof(buffer) - 1)) > 0)
     {
+        printf("message received");
         buffer[ret] = '\0';
+        if (checkExitMsg(buffer))
+        {
+            exit(1);
+        }
         printf("%s", buffer);
     }
     if (ret < 0)
@@ -59,6 +58,37 @@ void *receiveMessage(void *socket)
     return NULL;
 }
 
+void *sendMessage(void *socket)
+{
+    int sockfd = *(int *)socket;
+    char buffer[256];
+    ssize_t n;
+
+    while (1)
+    {
+        memset(buffer, 0, sizeof(buffer));
+        if (!fgets(buffer, sizeof(buffer), stdin))
+            error("ERROR reading stdin");
+
+        char message[300];
+        snprintf(message, sizeof(message), "<%s> %s", username, buffer);
+        
+        if(checkExitMsg(buffer))
+        {
+            n = write(sockfd, buffer, strlen(buffer));
+            exit(1);
+        }
+        else
+        {
+            n = write(sockfd, message, strlen(message));
+        }
+
+        if (n < 0)
+            error("ERROR writing to socket");
+    }
+    return NULL;
+}
+
 int main(int argc, char *argv[])
 {
     int sockfd, portno;
@@ -66,7 +96,8 @@ int main(int argc, char *argv[])
     struct hostent *server;
     pthread_t rThread, sThread;
 
-    if (argc < 3) {
+    if (argc < 3)
+    {
         fprintf(stderr, "usage: %s hostname port\n", argv[0]);
         return 1;
     }
@@ -82,7 +113,8 @@ int main(int argc, char *argv[])
         error("ERROR opening socket");
 
     server = gethostbyname(argv[1]);
-    if (server == NULL) {
+    if (server == NULL)
+    {
         fprintf(stderr, "ERROR, no such host\n");
         return 1;
     }
