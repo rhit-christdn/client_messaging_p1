@@ -1,104 +1,91 @@
 #include <stdio.h>
-#include <stdlib.h> // exit, atoi
-#include <string.h> // strlen, memset, memcpy
-#include <unistd.h> // read, write, close
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netdb.h>     // gethostbyname
-#include <arpa/inet.h> // htons, inet_ntoa
-#include <pthread.h>   // pthreads
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <pthread.h>
 
 char username[32];
 char remoteUsername[32];
 
-static void error(const char *msg)
-{
+void error(const char *msg) {
     perror(msg);
     exit(1);
 }
 
-int checkExitMsg(char *msg)
-{
-    size_t len = strlen(msg);
-    if (len > 0 && msg[len - 1] == '\n')
-    {
-        msg[len - 1] = '\0';
-    }
-    if ((strcmp(msg, "exit") == 0))
-    {
-        return 1;
-    }
-
-    return 0;
+int checkExitMsg(char *msg) {
+    return strcmp(msg, "exit") == 0;
 }
 
-void *receiveMessage(void *socket)
-{
+void *receiveMessage(void *socket) {
     int sockfd = *(int *)socket;
     char buffer[256];
     int ret;
 
-    memset(buffer, 0, sizeof(buffer));
-    while ((ret = read(sockfd, buffer, sizeof(buffer) - 1)) > 0)
-    {
-        printf("message received");
+    while ((ret = read(sockfd, buffer, sizeof(buffer) - 1)) > 0) {
         buffer[ret] = '\0';
-        if (checkExitMsg(buffer))
-        {
-            exit(1);
+
+        if (checkExitMsg(buffer)) {
+            printf("Remote user exited.\n");
+            close(sockfd);
+            exit(0);
         }
-        printf("%s", buffer);
+
+        printf("%s\n", buffer);
+        fflush(stdout);
     }
+
     if (ret < 0)
-        printf("Error receiving data!\n");
+        perror("Error receiving data");
     else
-        printf("Closing connection\n");
+        printf("Connection closed by remote\n");
+
     close(sockfd);
+    exit(0);
     return NULL;
 }
 
-void *sendMessage(void *socket)
-{
+void *sendMessage(void *socket) {
     int sockfd = *(int *)socket;
     char buffer[256];
     ssize_t n;
 
-    while (1)
-    {
-        memset(buffer, 0, sizeof(buffer));
+    while (1) {
         if (!fgets(buffer, sizeof(buffer), stdin))
             error("ERROR reading stdin");
 
-        char message[300];
-        snprintf(message, sizeof(message), "<%s> %s", username, buffer);
-        
-        if(checkExitMsg(buffer))
-        {
-            n = write(sockfd, buffer, strlen(buffer));
-            exit(1);
-        }
-        else
-        {
-            n = write(sockfd, message, strlen(message));
+        buffer[strcspn(buffer, "\n")] = '\0';
+
+        if (checkExitMsg(buffer)) {
+            write(sockfd, "exit", 4);
+            printf("Exiting...\n");
+            close(sockfd);
+            exit(0);
         }
 
+        char message[300];
+        snprintf(message, sizeof(message), "<%s> %s", username, buffer);
+
+        n = write(sockfd, message, strlen(message));
         if (n < 0)
             error("ERROR writing to socket");
     }
+
     return NULL;
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     int sockfd, portno;
     struct sockaddr_in serv_addr;
     struct hostent *server;
     pthread_t rThread, sThread;
 
-    if (argc < 3)
-    {
-        fprintf(stderr, "usage: %s hostname port\n", argv[0]);
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s hostname port\n", argv[0]);
         return 1;
     }
 
@@ -113,8 +100,7 @@ int main(int argc, char *argv[])
         error("ERROR opening socket");
 
     server = gethostbyname(argv[1]);
-    if (server == NULL)
-    {
+    if (server == NULL) {
         fprintf(stderr, "ERROR, no such host\n");
         return 1;
     }
@@ -127,12 +113,11 @@ int main(int argc, char *argv[])
     if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
         error("ERROR connecting");
 
-    // send our username first, receive remote username
     write(sockfd, username, strlen(username));
     read(sockfd, remoteUsername, sizeof(remoteUsername));
+
     printf("Connected to server as %s, remote is %s\n", username, remoteUsername);
 
-    // create threads ONCE
     if (pthread_create(&sThread, NULL, sendMessage, &sockfd))
         error("ERROR creating send thread");
 

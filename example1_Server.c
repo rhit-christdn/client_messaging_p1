@@ -11,94 +11,80 @@
 char username[32];
 char remoteUsername[32];
 
-void error(char *msg)
-{
+void error(const char *msg) {
     perror(msg);
     exit(1);
 }
 
-int checkExitMsg(char *msg)
-{
-    size_t len = strlen(msg);
-    if (len > 0 && msg[len - 1] == '\n')
-    {
-        msg[len - 1] = '\0';
-    }
-    if ((strcmp(msg, "exit") == 0))
-    {
-        return 1;
-    }
-
-    return 0;
+int checkExitMsg(char *msg) {
+    return strcmp(msg, "exit") == 0;
 }
 
-void *receiveMessage(void *socket)
-{
+void *receiveMessage(void *socket) {
     int sockfd = *(int *)socket;
     char buffer[256];
     int ret;
 
-    memset(buffer, 0, sizeof(buffer));
-    while ((ret = read(sockfd, buffer, sizeof(buffer) - 1)) > 0)
-    {
-        printf("message received");
+    while ((ret = read(sockfd, buffer, sizeof(buffer) - 1)) > 0) {
         buffer[ret] = '\0';
-        if (checkExitMsg(buffer))
-        {
-            exit(1);
+
+        if (checkExitMsg(buffer)) {
+            printf("Remote user exited.\n");
+            close(sockfd);
+            exit(0);
         }
-        printf("%s", buffer);
+
+        printf("%s\n", buffer);
+        fflush(stdout);
     }
+
     if (ret < 0)
-        printf("Error receiving data!\n");
+        perror("Error receiving data");
     else
-        printf("Closing connection\n");
+        printf("Connection closed by remote\n");
+
     close(sockfd);
-    exit(1);
+    exit(0);
     return NULL;
 }
 
-void *sendMessage(void *socket)
-{
+void *sendMessage(void *socket) {
     int sockfd = *(int *)socket;
     char buffer[256];
     ssize_t n;
 
-    while (1)
-    {
-        memset(buffer, 0, sizeof(buffer));
+    while (1) {
         if (!fgets(buffer, sizeof(buffer), stdin))
             error("ERROR reading stdin");
 
-        char message[300];
-        snprintf(message, sizeof(message), "<%s> %s", username, buffer);
-        
-        if(checkExitMsg(buffer))
-        {
-            n = write(sockfd, buffer, strlen(buffer));
-            exit(1);
-        }
-        else
-        {
-            n = write(sockfd, message, strlen(message));
+        buffer[strcspn(buffer, "\n")] = '\0';
+
+        if (checkExitMsg(buffer)) {
+            write(sockfd, "exit", 4);
+            printf("Exiting...\n");
+            close(sockfd);
+            exit(0);
         }
 
+        char message[300];
+        snprintf(message, sizeof(message), "<%s> %s", username, buffer);
+
+        n = write(sockfd, message, strlen(message));
         if (n < 0)
             error("ERROR writing to socket");
     }
+
     return NULL;
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     int sockfd, newsockfd, portno;
     socklen_t clilen;
     struct sockaddr_in serv_addr, cli_addr;
     pthread_t rThread, sThread;
 
-    if (argc < 2)
-    {
-        fprintf(stderr, "ERROR, no port provided\n");
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s port\n", argv[0]);
         exit(1);
     }
 
@@ -116,6 +102,7 @@ int main(int argc, char *argv[])
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(portno);
     serv_addr.sin_addr.s_addr = INADDR_ANY;
+
     if (bind(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
         error("ERROR on binding");
 
@@ -127,6 +114,7 @@ int main(int argc, char *argv[])
 
     read(newsockfd, remoteUsername, sizeof(remoteUsername));
     write(newsockfd, username, strlen(username));
+
     printf("Connection established with %s (%s)\n",
            inet_ntoa(cli_addr.sin_addr), remoteUsername);
 
@@ -139,5 +127,7 @@ int main(int argc, char *argv[])
     pthread_join(sThread, NULL);
     pthread_join(rThread, NULL);
 
+    close(newsockfd);
+    close(sockfd);
     return 0;
 }
