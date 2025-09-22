@@ -52,7 +52,8 @@ void *receiveMessage(void *socket) {
 
 		//check for exit
         if (checkExitMsg(buffer)) {
-            printf("Remote user exited.\n");
+            printf("\nRemote user exited.\n");
+			printf("<%s> ", username);
             close(sockfd);
             exit(0);
         }
@@ -65,8 +66,10 @@ void *receiveMessage(void *socket) {
 
     if (ret < 0)
         perror("Error receiving data");
-    else
-        printf("Connection closed by remote\n");
+    else {
+        printf("\n Connection closed by remote\n");
+		printf("<%s> ", username);
+	}
 
     close(sockfd);
     exit(0);
